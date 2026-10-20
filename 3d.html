@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="ja" class="h-full bg-slate-950 text-slate-100">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>リアルタイム世界地震データ 3D地球儀 (8K Ultra Visual)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- OrbitControls -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        /* Custom scrollbar for dark theme */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #090d16;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #1e293b;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #334155;
+        }
+        
+        .glass-panel {
+            background: rgba(10, 15, 30, 0.85);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        .pulse-animation {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 0.8; }
+            50% { transform: scale(1.1); opacity: 1; }
+            100% { transform: scale(1); opacity: 0.8; }
+        }
+
+        /* Subtle glowing text and buttons */
+        .glow-indigo {
+            box-shadow: 0 0 15px rgba(99, 102, 241, 0.35);
+        }
+    </style>
+</head>
+<body class="h-full overflow-hidden flex flex-col font-sans select-none bg-slate-950 text-slate-100">
+
+    <!-- Top Navigation / Header -->
+    <header class="glass-panel z-10 px-4 py-3 flex items-center justify-between shrink-0 shadow-2xl border-b border-slate-800/80">
+        <div class="flex items-center space-x-3">
+            <div class="p-2 bg-gradient-to-br from-indigo-500/20 to-purple-500/20 text-indigo-400 rounded-xl border border-indigo-500/30 shadow-inner">
+                <i class="fa-solid fa-globe text-xl animate-spin-slow"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-lg leading-tight bg-gradient-to-r from-cyan-400 via-indigo-300 to-purple-400 bg-clip-text text-transparent tracking-wide">
+                    Global Earthquake Visualizer 3D
+                </h1>
+                <p class="text-xs text-slate-400 flex items-center gap-1.5">
+                    <span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                    USGS リアルタイム地震監視システム (8K リアル地球儀)
+                </p>
+            </div>
+        </div>
+
+        <div class="flex items-center space-x-2 sm:space-x-4">
+            <div id="stats-summary" class="hidden sm:flex items-center gap-4 text-xs bg-slate-900/80 px-3.5 py-1.5 rounded-lg border border-slate-800/80">
+                <div>総数: <span id="total-count" class="font-bold text-indigo-400">---</span></div>
+                <div>最大M: <span id="max-mag" class="font-bold text-red-400">---</span></div>
+            </div>
+            <button id="refresh-btn" class="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium bg-indigo-600/20 hover:bg-indigo-600/40 active:bg-indigo-700/60 text-indigo-200 rounded-lg transition border border-indigo-500/40 shadow-sm">
+                <i class="fa-solid fa-rotate-right" id="refresh-icon"></i>
+                <span class="hidden xs:inline">データ更新</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Content Grid -->
+    <main class="relative flex-1 flex overflow-hidden">
+
+        <!-- 3D Earth Viewport Container -->
+        <div id="canvas-container" class="relative flex-1 w-full h-full cursor-grab active:cursor-grabbing bg-black">
+            <!-- Loading Indicator Overlay -->
+            <div id="loading-overlay" class="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-950/85 backdrop-blur-lg transition-opacity duration-500">
+                <div class="relative flex items-center justify-center">
+                    <div class="w-20 h-20 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin"></div>
+                    <i class="fa-solid fa-earth-americas text-indigo-400 text-2xl absolute animate-pulse"></i>
+                </div>
+                <p id="loading-text" class="mt-5 text-xs sm:text-sm font-semibold text-slate-300 tracking-wider">高精細テクスチャ生成 &amp; 最新の地震データを同期中...</p>
+            </div>
+
+            <!-- Controls & Overlay Buttons on Canvas -->
+            <div class="absolute top-4 left-4 z-10 flex flex-col gap-2">
+                <button id="reset-cam-btn" class="p-2.5 glass-panel hover:bg-slate-800/80 text-slate-300 hover:text-white rounded-xl transition shadow text-xs flex items-center gap-2 border border-slate-700/50" title="視点をリセット">
+                    <i class="fa-solid fa-compress text-indigo-400"></i>
+                    <span class="hidden sm:inline">カメラリセット</span>
+                </button>
+                <button id="toggle-rotation-btn" class="p-2.5 glass-panel hover:bg-slate-800/80 text-slate-300 hover:text-white rounded-xl transition shadow text-xs flex items-center gap-2 border border-slate-700/50" title="自転切り替え">
+                    <i class="fa-solid fa-arrows-spin text-indigo-400"></i>
+                    <span class="hidden sm:inline" id="rotation-btn-text">自転停止</span>
+                </button>
+                <button id="toggle-clouds-btn" class="p-2.5 glass-panel hover:bg-slate-800/80 text-slate-300 hover:text-white rounded-xl transition shadow text-xs flex items-center gap-2 border border-slate-700/50" title="雲の表示/非表示">
+                    <i class="fa-solid fa-cloud text-indigo-400"></i>
+                    <span class="hidden sm:inline" id="clouds-btn-text">雲を表示</span>
+                </button>
+            </div>
+
+            <!-- Legend Overlay -->
+            <div class="absolute bottom-4 left-4 z-10 glass-panel p-3.5 rounded-2xl border border-slate-800/80 max-w-xs text-xs space-y-2 shadow-xl">
+                <div class="font-semibold text-slate-200 pb-1.5 border-b border-slate-800 flex justify-between items-center">
+                    <span class="flex items-center gap-1.5"><i class="fa-solid fa-layer-group text-indigo-400"></i> マグニチュード凡例</span>
+                </div>
+                <div class="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px] text-slate-300">
+                    <div class="flex items-center gap-2">
+                        <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block shadow-sm shadow-emerald-400/50"></span>
+                        <span>M &lt; 2.5 (微小)</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="w-2.5 h-2.5 rounded-full bg-yellow-400 inline-block shadow-sm shadow-yellow-400/50"></span>
+                        <span>M 2.5 - 4.5 (軽微)</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="w-2.5 h-2.5 rounded-full bg-orange-500 inline-block shadow-sm shadow-orange-500/50"></span>
+                        <span>M 4.5 - 6.0 (中規模)</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="w-2.5 h-2.5 rounded-full bg-red-600 inline-block shadow-md shadow-red-600"></span>
+                        <span>M 6.0+ (大規模)</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Selected Earthquake Detail Card Overlay -->
+            <div id="detail-card" class="hidden absolute top-4 right-4 z-20 glass-panel p-4 rounded-2xl shadow-2xl border border-indigo-500/40 w-80 max-w-[calc(100vw-2rem)] transition-all transform duration-200">
+                <div class="flex justify-between items-start mb-2">
+                    <span id="card-mag-badge" class="px-2.5 py-1 text-xs font-bold rounded-lg bg-red-500/20 text-red-400 border border-red-500/40 shadow-inner">
+                        M ---
+                    </span>
+                    <button id="close-card-btn" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition">
+                        <i class="fa-solid fa-xmark text-base"></i>
+                    </button>
+                </div>
+                <h3 id="card-place" class="font-semibold text-sm text-slate-100 line-clamp-2 mb-3">---</h3>
+                <div class="space-y-1.5 text-xs text-slate-300">
+                    <div class="flex justify-between py-1 border-b border-slate-800/80">
+                        <span class="text-slate-400">発生日時:</span>
+                        <span id="card-time" class="font-mono text-indigo-200">---</span>
+                    </div>
+                    <div class="flex justify-between py-1 border-b border-slate-800/80">
+                        <span class="text-slate-400">震源の深さ:</span>
+                        <span id="card-depth" class="font-mono text-indigo-200">---</span>
+                    </div>
+                    <div class="flex justify-between py-1 border-b border-slate-800/80">
+                        <span class="text-slate-400">緯度 / 経度:</span>
+                        <span id="card-coords" class="font-mono text-indigo-200">---</span>
+                    </div>
+                </div>
+                <a id="card-link" href="#" target="_blank" rel="noopener noreferrer" class="mt-3 block w-full text-center py-2 bg-indigo-600/30 hover:bg-indigo-600/50 active:bg-indigo-700/60 text-indigo-200 text-xs font-medium rounded-xl border border-indigo-500/40 transition">
+                    USGS 詳細レポート <i class="fa-solid fa-arrow-up-right-from-square text-[10px] ml-1"></i>
+                </a>
+            </div>
+        </div>
+
+        <!-- Right Sidebar (Filter & Earthquake List) -->
+        <aside id="sidebar" class="glass-panel w-full md:w-80 lg:w-96 flex flex-col h-full border-l border-slate-800/80 transition-all duration-300 absolute md:relative right-0 z-10 translate-x-full md:translate-x-0 shadow-2xl">
+            <div class="p-3.5 border-b border-slate-800/80 space-y-3 bg-slate-900/60">
+                <div class="flex items-center justify-between">
+                    <h2 class="font-semibold text-sm text-slate-200 flex items-center gap-2">
+                        <i class="fa-solid fa-list-ul text-indigo-400"></i> 地震アクティビティ
+                    </h2>
+                    <span id="list-count" class="text-xs px-2.5 py-0.5 rounded-full bg-slate-800/80 border border-slate-700/50 text-slate-300">0 件</span>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                        <label class="block text-[10px] text-slate-400 mb-1">対象期間</label>
+                        <select id="time-filter" class="w-full bg-slate-950/90 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-indigo-500">
+                            <option value="day">過去24時間</option>
+                            <option value="hour">過去1時間</option>
+                            <option value="week">過去7日間</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] text-slate-400 mb-1">最小マグニチュード</label>
+                        <select id="mag-filter" class="w-full bg-slate-950/90 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-indigo-500">
+                            <option value="all">すべて (All)</option>
+                            <option value="1.0">M 1.0+</option>
+                            <option value="2.5" selected>M 2.5+</option>
+                            <option value="4.5">M 4.5+</option>
+                            <option value="6.0">M 6.0+</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div id="earthquake-list" class="flex-1 overflow-y-auto divide-y divide-slate-800/40 p-2 space-y-1">
+                <!-- Items populated dynamically -->
+            </div>
+        </aside>
+
+        <!-- Mobile Sidebar Toggle Tab -->
+        <button id="toggle-sidebar-btn" class="md:hidden absolute bottom-20 right-4 z-20 p-3 bg-indigo-600 text-white rounded-full shadow-2xl hover:bg-indigo-500 active:scale-95 transition">
+            <i class="fa-solid fa-list text-base"></i>
+        </button>
+
+    </main>
+
+    <!-- JavaScript Application Logic -->
+    <script>
+        const state = {
+            earthquakes: [],
+            selectedQuake: null,
+            timeFilter: 'day',
+            magFilter: '2.5',
+            autoRotate: true,
+            showClouds: true,
+            markers: [],
+            pulseRings: []
+        };
+
+        const canvasContainer = document.getElementById('canvas-container');
+        const loadingOverlay = document.getElementById('loading-overlay');
+        const earthquakeListEl = document.getElementById('earthquake-list');
+        const refreshBtn = document.getElementById('refresh-btn');
+        const refreshIcon = document.getElementById('refresh-icon');
+        const timeFilterEl = document.getElementById('time-filter');
+        const magFilterEl = document.getElementById('mag-filter');
+        const detailCard = document.getElementById('detail-card');
+        const toggleRotationBtn = document.getElementById('toggle-rotation-btn');
+        const rotationBtnText = document.getElementById('rotation-btn-text');
+        const toggleCloudsBtn = document.getElementById('toggle-clouds-btn');
+        const cloudsBtnText = document.getElementById('clouds-btn-text');
+        const resetCamBtn = document.getElementById('reset-cam-btn');
+        const sidebar = document.getElementById('sidebar');
+        const toggleSidebarBtn = document.getElementById('toggle-sidebar-btn');
+
+        let scene, camera, renderer, controls, earthMesh, atmosphereMesh, cloudsMesh, starsMesh;
+        const EARTH_RADIUS = 5;
+
+        function getMagColor(mag) {
+            if (mag >= 6.0) return 0xef4444; // Bright Red
+            if (mag >= 4.5) return 0xf97316; // Vibrant Orange
+            if (mag >= 2.5) return 0xeab308; // Yellow
+            return 0x10b981; // Emerald Green
+        }
+
+        function getMagColorHex(mag) {
+            if (mag >= 6.0) return '#ef4444';
+            if (mag >= 4.5) return '#f97316';
+            if (mag >= 2.5) return '#eab308';
+            return '#10b981';
+        }
+
+        function initThreeJS() {
+            scene = new THREE.Scene();
+
+            const aspect = canvasContainer.clientWidth / canvasContainer.clientHeight;
+            camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 1000);
+            camera.position.set(0, 0, 14);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
+            renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.2;
+            canvasContainer.appendChild(renderer.domElement);
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.rotateSpeed = 0.8;
+            controls.minDistance = 5.8;
+            controls.maxDistance = 30;
+
+            // Lighting Setup for Photorealistic Space Effect
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+            scene.add(ambientLight);
+
+            const sunLight = new THREE.DirectionalLight(0xffffff, 1.8);
+            sunLight.position.set(20, 10, 15);
+            scene.add(sunLight);
+
+            const rimLight = new THREE.DirectionalLight(0x38bdf8, 0.6);
+            rimLight.position.set(-20, -10, -15);
+            scene.add(rimLight);
+
+            createEarthAndAtmosphere();
+            createStarfield();
+
+            window.addEventListener('resize', onWindowResize);
+            setupInteractionListeners();
+
+            animate();
+        }
+
+        function createEarthAndAtmosphere() {
+            const textureLoader = new THREE.TextureLoader();
+            
+            // NASA High-Resolution Earth Maps (Public Domain / Reliable CDNs)
+            const dayMap = textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/earth_atmos_2048.jpg');
+            const specMap = textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/earth_specular_2048.jpg');
+            const normalMap = textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/earth_normal_2048.jpg');
+            const cloudMap = textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/earth_clouds_1024.png');
+
+            // 1. Photorealistic Earth Mesh
+            const geometry = new THREE.SphereGeometry(EARTH_RADIUS, 128, 128);
+            const material = new THREE.MeshPhongMaterial({
+                map: dayMap,
+                specularMap: specMap,
+                normalMap: normalMap,
+                normalScale: new THREE.Vector2(0.85, 0.85),
+                shininess: 25,
+                color: 0xffffff
+            });
+
+            earthMesh = new THREE.Mesh(geometry, material);
+            scene.add(earthMesh);
+
+            // 2. Realistic Photorealistic Clouds Layer
+            const cloudGeo = new THREE.SphereGeometry(EARTH_RADIUS * 1.015, 96, 96);
+            const cloudMat = new THREE.MeshPhongMaterial({
+                map: cloudMap,
+                transparent: true,
+                opacity: 0.8,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false
+            });
+            cloudsMesh = new THREE.Mesh(cloudGeo, cloudMat);
+            earthMesh.add(cloudsMesh);
+
+            // 3. Glowing Atmosphere Outer Shell
+            const atmosGeo = new THREE.SphereGeometry(EARTH_RADIUS * 1.03, 96, 96);
+            const atmosMat = new THREE.MeshBasicMaterial({
+                color: 0x38bdf8,
+                transparent: true,
+                opacity: 0.22,
+                side: THREE.BackSide,
+                blending: THREE.AdditiveBlending
+            });
+            atmosphereMesh = new THREE.Mesh(atmosGeo, atmosMat);
+            scene.add(atmosphereMesh);
+        }
+
+        function createStarfield() {
+            const starsGeo = new THREE.BufferGeometry();
+            const count = 4000;
+            const positions = new Float32Array(count * 3);
+            const colors = new Float32Array(count * 3);
+
+            for (let i = 0; i < count * 3; i += 3) {
+                positions[i] = (Math.random() - 0.5) * 400;
+                positions[i + 1] = (Math.random() - 0.5) * 400;
+                positions[i + 2] = (Math.random() - 0.5) * 400;
+
+                colors[i] = 0.8 + Math.random() * 0.2;
+                colors[i + 1] = 0.8 + Math.random() * 0.2;
+                colors[i + 2] = 0.9 + Math.random() * 0.1;
+            }
+
+            starsGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            starsGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+            const starsMat = new THREE.PointsMaterial({
+                size: 0.8,
+                vertexColors: true,
+                transparent: true,
+                opacity: 0.85
+            });
+
+            starsMesh = new THREE.Points(starsGeo, starsMat);
+            scene.add(starsMesh);
+        }
+
+        async function fetchEarthquakeData() {
+            showLoading(true);
+            refreshIcon.classList.add('animate-spin');
+
+            const timeVal = timeFilterEl.value;
+            const magVal = magFilterEl.value;
+
+            let url = `https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/`;
+            if (magVal === 'all') {
+                url += `all_${timeVal}.geojson`;
+            } else if (magVal === '1.0') {
+                url += `1.0_${timeVal}.geojson`;
+            } else if (magVal === '2.5') {
+                url += `2.5_${timeVal}.geojson`;
+            } else if (magVal === '4.5') {
+                url += `4.5_${timeVal}.geojson`;
+            } else if (magVal === '6.0') {
+                url += `significant_${timeVal}.geojson`;
+            } else {
+                url += `2.5_${timeVal}.geojson`;
+            }
+
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error('ネットワークに応答がありませんでした');
+                const data = await response.json();
+
+                state.earthquakes = data.features || [];
+                updateHeaderStats();
+                render3DMarkers();
+                renderSidebarList();
+            } catch (error) {
+                console.error('地震データの取得に失敗しました:', error);
+            } finally {
+                showLoading(false);
+                refreshIcon.classList.remove('animate-spin');
+            }
+        }
+
+        // Spherical math: Convert Lat/Lng to local 3D vector coordinates on sphere
+        function latLngToVector3(lat, lng, radius) {
+            const phi = (90 - lat) * (Math.PI / 180);
+            const theta = (lng + 180) * (Math.PI / 180);
+
+            const x = -(radius * Math.sin(phi) * Math.cos(theta));
+            const z = (radius * Math.sin(phi) * Math.sin(theta));
+            const y = (radius * Math.cos(phi));
+
+            return new THREE.Vector3(x, y, z);
+        }
+
+        function render3DMarkers() {
+            // Clean up existing markers attached to earthMesh
+            state.markers.forEach(m => earthMesh.remove(m));
+            state.markers = [];
+            state.pulseRings.forEach(r => earthMesh.remove(r));
+            state.pulseRings = [];
+
+            state.earthquakes.forEach(quake => {
+                const [lng, lat, depth] = quake.geometry.coordinates;
+                const mag = Math.max(0.1, quake.properties.mag || 1.0);
+
+                // Calculate vector position relative to earthMesh surface
+                const position = latLngToVector3(lat, lng, EARTH_RADIUS + 0.035);
+
+                const baseRadius = Math.max(0.04, mag * 0.025);
+                const geom = new THREE.SphereGeometry(baseRadius, 16, 16);
+                const color = getMagColor(mag);
+
+                const mat = new THREE.MeshBasicMaterial({ color: color });
+                const markerMesh = new THREE.Mesh(geom, mat);
+                markerMesh.position.copy(position);
+
+                markerMesh.userData = { earthquake: quake };
+
+                // CRITICAL FIX: ATTACH DIRECTLY TO earthMesh SO IT ROTATES PERFECTLY WITH EARTH
+                earthMesh.add(markerMesh);
+                state.markers.push(markerMesh);
+
+                // Pulse ring for M4.5+ earthquakes
+                if (mag >= 4.5) {
+                    const ringGeo = new THREE.RingGeometry(baseRadius * 1.2, baseRadius * 2.8, 32);
+                    const ringMat = new THREE.MeshBasicMaterial({
+                        color: color,
+                        side: THREE.DoubleSide,
+                        transparent: true,
+                        opacity: 0.75
+                    });
+                    const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+                    ringMesh.position.copy(position);
+                    ringMesh.lookAt(earthMesh.position); // Orient ring flat against earth sphere surface
+                    ringMesh.userData = { initialScale: 1, maxScale: 2.6, currentScale: 1 };
+                    
+                    earthMesh.add(ringMesh);
+                    state.pulseRings.push(ringMesh);
+                }
+            });
+        }
+
+        function renderSidebarList() {
+            earthquakeListEl.innerHTML = '';
+            document.getElementById('list-count').textContent = `${state.earthquakes.length} 件`;
+
+            if (state.earthquakes.length === 0) {
+                earthquakeListEl.innerHTML = `
+                    <div class="text-center py-8 text-slate-500 text-xs">
+                        条件に一致する地震情報が見つかりませんでした
+                    </div>
+                `;
+                return;
+            }
+
+            const sorted = [...state.earthquakes].sort((a, b) => b.properties.time - a.properties.time);
+
+            sorted.forEach(quake => {
+                const { mag, place, time } = quake.properties;
+                const [lng, lat, depth] = quake.geometry.coordinates;
+                const colorHex = getMagColorHex(mag || 0);
+
+                const dateStr = new Date(time).toLocaleString('ja-JP', {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+
+                const item = document.createElement('div');
+                item.className = 'p-2.5 rounded-xl hover:bg-slate-800/60 cursor-pointer transition flex items-center justify-between group border border-transparent hover:border-slate-700/50';
+                item.onclick = () => selectEarthquake(quake, true);
+
+                item.innerHTML = `
+                    <div class="flex items-center space-x-3 overflow-hidden">
+                        <div class="w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 shadow-inner" style="background-color: ${colorHex}20; color: ${colorHex}; border: 1px solid ${colorHex}40;">
+                            M${(mag || 0).toFixed(1)}
+                        </div>
+                        <div class="truncate">
+                            <p class="text-xs font-medium text-slate-200 group-hover:text-indigo-300 truncate">${place}</p>
+                            <p class="text-[10px] text-slate-400 mt-0.5">${dateStr} • 深さ: ${depth}km</p>
+                        </div>
+                    </div>
+                    <i class="fa-solid fa-chevron-right text-[10px] text-slate-600 group-hover:text-slate-400 transition ml-2"></i>
+                `;
+
+                earthquakeListEl.appendChild(item);
+            });
+        }
+
+        function selectEarthquake(quake, moveCamera = false) {
+            state.selectedQuake = quake;
+            const { mag, place, time, url } = quake.properties;
+            const [lng, lat, depth] = quake.geometry.coordinates;
+
+            document.getElementById('card-mag-badge').textContent = `M ${(mag || 0).toFixed(1)}`;
+            document.getElementById('card-mag-badge').style.borderColor = getMagColorHex(mag);
+            document.getElementById('card-mag-badge').style.color = getMagColorHex(mag);
+            document.getElementById('card-place').textContent = place;
+            document.getElementById('card-time').textContent = new Date(time).toLocaleString('ja-JP');
+            document.getElementById('card-depth').textContent = `${depth} km`;
+            document.getElementById('card-coords').textContent = `${lat.toFixed(2)}°, ${lng.toFixed(2)}°`;
+            document.getElementById('card-link').href = url;
+
+            detailCard.classList.remove('hidden');
+
+            if (moveCamera) {
+                // Calculate world coordinates for selected quake location considering current earthMesh rotation
+                const localPos = latLngToVector3(lat, lng, EARTH_RADIUS + 7);
+                const worldPos = localPos.clone().applyMatrix4(earthMesh.matrixWorld);
+
+                state.autoRotate = false;
+                updateRotationBtn();
+
+                animateCameraTo(worldPos);
+            }
+        }
+
+        function animateCameraTo(targetPosition) {
+            const startPos = camera.position.clone();
+            const duration = 1000;
+            const startTime = performance.now();
+
+            function step(currentTime) {
+                const elapsed = currentTime - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+                const ease = 1 - Math.pow(1 - progress, 3);
+
+                camera.position.lerpVectors(startPos, targetPosition, ease);
+                controls.update();
+
+                if (progress < 1) {
+                    requestAnimationFrame(step);
+                }
+            }
+            requestAnimationFrame(step);
+        }
+
+        function setupInteractionListeners() {
+            const raycaster = new THREE.Raycaster();
+            const mouse = new THREE.Vector2();
+
+            canvasContainer.addEventListener('click', (e) => {
+                const rect = renderer.domElement.getBoundingClientRect();
+                mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+                mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObjects(state.markers);
+
+                if (intersects.length > 0) {
+                    const quake = intersects[0].object.userData.earthquake;
+                    if (quake) {
+                        selectEarthquake(quake, false);
+                    }
+                }
+            });
+
+            refreshBtn.onclick = fetchEarthquakeData;
+            timeFilterEl.onchange = fetchEarthquakeData;
+            magFilterEl.onchange = fetchEarthquakeData;
+
+            document.getElementById('close-card-btn').onclick = () => {
+                detailCard.classList.add('hidden');
+            };
+
+            toggleRotationBtn.onclick = () => {
+                state.autoRotate = !state.autoRotate;
+                updateRotationBtn();
+            };
+
+            toggleCloudsBtn.onclick = () => {
+                state.showClouds = !state.showClouds;
+                if (cloudsMesh) cloudsMesh.visible = state.showClouds;
+                cloudsBtnText.textContent = state.showClouds ? '雲を表示' : '雲を非表示';
+            };
+
+            resetCamBtn.onclick = () => {
+                animateCameraTo(new THREE.Vector3(0, 0, 14));
+            };
+
+            toggleSidebarBtn.onclick = () => {
+                sidebar.classList.toggle('translate-x-full');
+            };
+        }
+
+        function updateRotationBtn() {
+            rotationBtnText.textContent = state.autoRotate ? '自転停止' : '自転開始';
+        }
+
+        function updateHeaderStats() {
+            document.getElementById('total-count').textContent = state.earthquakes.length;
+            if (state.earthquakes.length > 0) {
+                const maxM = Math.max(...state.earthquakes.map(q => q.properties.mag || 0));
+                document.getElementById('max-mag').textContent = maxM.toFixed(1);
+            } else {
+                document.getElementById('max-mag').textContent = '---';
+            }
+        }
+
+        function showLoading(show) {
+            if (show) {
+                loadingOverlay.classList.remove('opacity-0', 'pointer-events-none');
+            } else {
+                loadingOverlay.classList.add('opacity-0', 'pointer-events-none');
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = canvasContainer.clientWidth / canvasContainer.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (state.autoRotate && earthMesh) {
+                earthMesh.rotation.y += 0.0012;
+            }
+
+            // Slowly drift cloud layer slightly faster than earth rotation for realism
+            if (cloudsMesh) {
+                cloudsMesh.rotation.y += 0.0003;
+            }
+
+            // Animate ring pulses synchronously on earth Mesh
+            state.pulseRings.forEach(ring => {
+                ring.userData.currentScale += 0.015;
+                if (ring.userData.currentScale > ring.userData.maxScale) {
+                    ring.userData.currentScale = 1;
+                }
+                const scale = ring.userData.currentScale;
+                ring.scale.set(scale, scale, scale);
+                ring.material.opacity = 1 - (scale / ring.userData.maxScale);
+            });
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        window.onload = () => {
+            initThreeJS();
+            fetchEarthquakeData();
+        };
+    </script>
+</body>
+</html>
